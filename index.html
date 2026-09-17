@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lineup Builder</title>
+    <meta name="description" content="Build football lineups on a full-width pitch, pick kit colours, manage your bench and export share-ready images." />
+    <meta name="theme-color" content="#07090d" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="css/styles.css" />
+    <script type="module" src="js/app.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <svg viewBox="0 0 32 32" width="34" height="34" aria-hidden="true">
+            <rect width="32" height="32" rx="9" fill="#c6f432" />
+            <rect x="6" y="9" width="20" height="14" rx="1.5" fill="none" stroke="#0b0f05" stroke-width="1.8" />
+            <path d="M16 9v14" stroke="#0b0f05" stroke-width="1.8" />
+            <circle cx="16" cy="16" r="2.6" fill="none" stroke="#0b0f05" stroke-width="1.8" />
+          </svg>
+          <span class="wordmark">Lineup<b>Builder</b></span>
+        </div>
+
+        <div class="match">
+          <input id="teamName" class="team-input" maxlength="40" placeholder="Team name" spellcheck="false" autocomplete="off" aria-label="Team name" />
+          <input id="subtitle" class="sub-input" maxlength="60" placeholder="Match, competition or date" spellcheck="false" autocomplete="off" aria-label="Subtitle" />
+        </div>
+
+        <div class="actions">
+          <button id="resetBtn" class="btn ghost" type="button" data-icon="reset"><span class="hide-sm">Reset</span></button>
+          <button id="exportBtn" class="btn primary" type="button" data-icon="image"><span>Export<span class="hide-sm"> image</span></span></button>
+        </div>
+      </header>
+
+      <section class="toolbar" aria-label="Lineup settings">
+        <div class="group">
+          <span class="group-label">Mode</span>
+          <div id="modeSeg"></div>
+        </div>
+        <div class="group" id="grpSize">
+          <span class="group-label">Format</span>
+          <div id="sizeSeg"></div>
+        </div>
+        <div class="group" id="grpFormation">
+          <span class="group-label">Formation</span>
+          <div class="select"><select id="formationSel" aria-label="Formation"></select></div>
+        </div>
+        <div class="group">
+          <span class="group-label">Kits</span>
+          <div class="kit-buttons">
+            <button id="kitBtn" class="kit-btn" type="button" aria-haspopup="dialog" aria-expanded="false"><span id="kitPreview" class="kit-prev"></span>Outfield</button>
+            <button id="gkBtn" class="kit-btn" type="button" aria-haspopup="dialog" aria-expanded="false"><span id="gkPreview" class="kit-prev"></span>Keeper</button>
+          </div>
+        </div>
+        <div class="group">
+          <span class="group-label">Pitch · <span id="pitchLabel"></span></span>
+          <div id="pitchSw" class="pitch-swatches"></div>
+        </div>
+        <div class="group">
+          <span class="group-label">Style</span>
+          <div id="tokenSeg"></div>
+        </div>
+        <div class="group">
+          <span class="group-label">Show</span>
+          <div id="showChips" class="chips"></div>
+        </div>
+      </section>
+
+      <main class="stage-wrap">
+        <div id="stage" class="stage">
+          <canvas id="pitch"></canvas>
+          <div id="tokens" class="tokens"></div>
+          <div id="stageEmpty" class="stage-empty" hidden>
+            <strong>Your pitch is empty</strong>
+            <span>Paste your squad below, double-click the pitch, or use Add player</span>
+          </div>
+        </div>
+        <div class="pitch-bar">
+          <div class="pitch-actions">
+            <button id="addPitchBtn" class="btn" type="button" data-icon="plus">Add player</button>
+            <button id="clearPitchBtn" class="btn ghost" type="button" data-icon="bench">Clear pitch</button>
+            <span id="pitchCount" class="pitch-count"></span>
+          </div>
+          <ul class="hint">
+            <li><b>Drag</b> players anywhere</li>
+            <li><b>Drop</b> onto a teammate or substitute to swap</li>
+            <li><b>Double-click</b> the pitch to add a player</li>
+            <li><b>Click</b> a player to edit</li>
+          </ul>
+        </div>
+      </main>
+
+      <div class="lower">
+        <section id="bench" class="bench" aria-label="Substitutes">
+          <div class="bench-head">
+            <div class="bench-title">
+              <h2>Substitutes</h2>
+              <span id="benchCount" class="count">0</span>
+            </div>
+            <span class="bench-sub hide-sm">Drag a card onto the pitch to bring a player on</span>
+          </div>
+          <div id="benchGrid" class="bench-grid"></div>
+        </section>
+
+        <div class="side-col">
+          <section class="panel" aria-labelledby="bulkTitle">
+            <div class="panel-head">
+              <h2 id="bulkTitle">Add players</h2>
+              <span class="panel-sub">Separate names with commas</span>
+            </div>
+            <form id="bulkForm" class="bulk" autocomplete="off">
+              <label class="field">
+                <span class="field-label">Players</span>
+                <textarea id="bulkPlayers" class="input area" rows="3" spellcheck="false" placeholder="Haaland 9, De Bruyne 17, Foden 47, Rodri 16, Dias 3"></textarea>
+              </label>
+              <label class="field">
+                <span class="field-label">Goalkeepers</span>
+                <textarea id="bulkGks" class="input area small" rows="1" spellcheck="false" placeholder="Ederson 31, Ortega 18"></textarea>
+              </label>
+              <div class="bulk-foot">
+                <div class="field">
+                  <span class="field-label">Add to</span>
+                  <div id="bulkTarget"></div>
+                </div>
+                <button class="btn primary" type="submit" data-icon="plus">Add players</button>
+              </div>
+              <p class="note">Numbers are optional: “Haaland 9” or “9 Haaland” both work.</p>
+            </form>
+          </section>
+
+          <section class="panel coach">
+            <div class="coach-icon" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h9l2-3h3"/><circle cx="9" cy="14" r="5"/><path d="M14 11h7v3a2 2 0 0 1-2 2h-4.3"/></svg>
+            </div>
+            <label class="field grow">
+              <span class="field-label">Head coach</span>
+              <input id="coachName" class="input" maxlength="36" placeholder="Coach name" spellcheck="false" autocomplete="off" />
+            </label>
+          </section>
+        </div>
+      </div>
+
+      <footer class="footer">Lineup Builder · Your lineup is saved in this browser</footer>
+    </div>
+
+    <aside id="drawer" class="drawer" aria-label="Player editor" aria-hidden="true">
+      <div id="drawerBody"></div>
+    </aside>
+
+    <div id="kitPop" class="popover" role="dialog" aria-label="Kit colours" hidden></div>
+
+    <div id="exportModal" class="modal" hidden>
+      <div class="modal-backdrop" data-close></div>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="exportTitle">
+        <div class="modal-head">
+          <h2 id="exportTitle">Export lineup</h2>
+          <button class="icon-btn" type="button" aria-label="Close" data-close data-icon="x"></button>
+        </div>
+        <div class="modal-body">
+          <div id="previewBox" class="preview">
+            <canvas id="previewCanvas"></canvas>
+          </div>
+          <div class="export-side">
+            <div class="section-title">Format</div>
+            <div id="formatList" class="formats"></div>
+            <div class="section-title">Include</div>
+            <div id="exportInclude" class="chips"></div>
+            <div class="section-title">Quality</div>
+            <div id="exportQuality"></div>
+            <div class="export-foot">
+              <div class="export-size">PNG · <span id="exportSize"></span></div>
+              <div class="export-actions">
+                <button id="copyBtn" class="btn" type="button" data-icon="copy">Copy</button>
+                <button id="downloadBtn" class="btn primary" type="button" data-icon="download">Download PNG</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
