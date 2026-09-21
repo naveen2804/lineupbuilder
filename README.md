@@ -12,6 +12,9 @@ Build football lineups on a full-width pitch and export them as share-ready imag
   5-lane / 18-zone overlays — with undo/redo and keyboard shortcuts. Markings can be included in exports.
 - **Saved lineups**: keep any number of lineups in the browser with thumbnails; open, rename, duplicate,
   delete, and export/import a JSON backup. <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd> saves the open lineup.
+- **Opposition team**: add their players in bulk, with their own kits, shape, head coach and bench.
+  Show them in their own half or across the full pitch. Exports read "vs Opposition" and list both benches.
+- Player size control (60–140%) for shirts or discs, and a light/dark interface theme
 - Everything is saved in your browser
 
 ## Run locally

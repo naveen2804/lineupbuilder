@@ -428,13 +428,13 @@ function drawFormationPill(ctx, x, cy, w, u, text, accent) {
   ctx.fillText(text, x + 52 * u, cy + 2 * u);
 }
 
-function drawCoach(ctx, x, y, u, name, align, dry) {
+function drawCoach(ctx, x, y, u, coach, align, dry) {
+  const { label, name } = coach;
   ctx.save();
   ctx.textAlign = align;
   ctx.textBaseline = 'middle';
   ctx.font = `700 ${15 * u}px ${UI}`;
   setSpacing(ctx, 3 * u);
-  const label = 'HEAD COACH';
   const lw = ctx.measureText(label).width;
   setSpacing(ctx, 0);
   ctx.font = `700 ${40 * u}px ${DISPLAY}`;
@@ -455,7 +455,12 @@ function drawCoach(ctx, x, y, u, name, align, dry) {
 function drawHeader(ctx, box, u, d, accent, stacked, dry) {
   const title = (d.teamName || '').trim().toUpperCase() || 'LINEUP';
   const sub = (d.subtitle || '').trim();
-  const coach = (d.coach || '').trim().toUpperCase();
+  // One coach block per team that has a coach named.
+  const home = (d.coach || '').trim().toUpperCase();
+  const away = (d.oppCoach || '').trim().toUpperCase();
+  const coaches = [];
+  if (home) coaches.push({ label: away ? `${(d.teamName || '').trim().toUpperCase() || 'HOME'} COACH` : 'HEAD COACH', name: home });
+  if (away) coaches.push({ label: `${(d.oppName || '').trim().toUpperCase() || 'OPPOSITION'} COACH`, name: away });
   ctx.save();
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
@@ -466,17 +471,31 @@ function drawHeader(ctx, box, u, d, accent, stacked, dry) {
   if (!stacked) {
     const base = sub ? 124 * u : 88 * u;
     const narrow = box.w < 1300 * u;
-    h = base + (coach && narrow ? 84 * u : 0);
     const tx = box.x + 34 * u;
+    // On narrow canvases the coaches sit in rows under the title instead of beside it.
+    const placed = [];
+    let rows = 0;
+    if (narrow && coaches.length) {
+      let x = tx;
+      for (const c of coaches) {
+        const w = drawCoach(ctx, 0, 0, u, c, 'left', true);
+        if (x > tx && x + w > box.x + box.w) {
+          rows += 1;
+          x = tx;
+        }
+        placed.push({ c, x, row: rows });
+        x += w + 64 * u;
+      }
+      rows += 1;
+    }
+    h = base + rows * 84 * u;
     let right = box.x + box.w;
     if (pw) {
       if (!dry) drawFormationPill(ctx, right - pw, box.y + base / 2, pw, u, d.formation, accent);
       right -= pw + 44 * u;
     }
-    if (coach) {
-      if (narrow) drawCoach(ctx, tx, box.y + base + 50 * u, u, coach, 'left', dry);
-      else right -= drawCoach(ctx, right, box.y + base / 2, u, coach, 'right', dry) + 56 * u;
-    }
+    if (narrow) for (const p of placed) drawCoach(ctx, p.x, box.y + base + 50 * u + p.row * 84 * u, u, p.c, 'left', dry);
+    else for (const c of [...coaches].reverse()) right -= drawCoach(ctx, right, box.y + base / 2, u, c, 'right', dry) + 56 * u;
     if (!dry) {
       ctx.fillStyle = accent;
       roundRectPath(ctx, box.x, box.y + 4 * u, 8 * u, h - 8 * u, 4 * u);
@@ -527,9 +546,9 @@ function drawHeader(ctx, box, u, d, accent, stacked, dry) {
       if (!dry) drawFormationPill(ctx, box.x, y + 34 * u, pw, u, d.formation, accent);
       y += 68 * u;
     }
-    if (coach) {
+    for (const c of coaches) {
       y += 34 * u;
-      drawCoach(ctx, box.x, y + 20 * u, u, coach, 'left', dry);
+      drawCoach(ctx, box.x, y + 20 * u, u, c, 'left', dry);
       y += 56 * u;
     }
     h = y - box.y;
@@ -538,42 +557,47 @@ function drawHeader(ctx, box, u, d, accent, stacked, dry) {
   return h;
 }
 
-function drawBench(ctx, box, d, u, column, pixelRatio) {
-  const list = d.bench;
+// Substitute lists to show: yours, plus the opposition's when they have any.
+function benchGroups(d) {
+  const opp = d.oppBench || [];
+  const groups = [];
+  if (d.bench.length) groups.push({ title: opp.length ? `${(d.teamName || 'Home').trim().toUpperCase()} SUBS` : 'SUBSTITUTES', list: d.bench });
+  if (opp.length) groups.push({ title: `${(d.oppName || 'Opposition').trim().toUpperCase()} SUBS`, list: opp });
+  return groups;
+}
+
+function drawBenchGroup(ctx, x, y, w, group, cols, rows, rowH, u, d, pixelRatio) {
+  const list = group.list;
+  const head = 44 * u;
+  const g = 10 * u;
   ctx.save();
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
 
-  const hy = box.y + 14 * u;
+  const hy = y + 14 * u;
   ctx.font = `700 ${19 * u}px ${UI}`;
   setSpacing(ctx, 3 * u);
   ctx.fillStyle = 'rgba(203,213,225,0.72)';
-  const label = 'SUBSTITUTES';
-  ctx.fillText(label, box.x, hy);
+  const label = ellipsize(ctx, group.title, w * 0.8);
+  ctx.fillText(label, x, hy);
   const lw = ctx.measureText(label).width;
   ctx.fillStyle = 'rgba(255,255,255,0.38)';
   const count = String(list.length);
-  ctx.fillText(count, box.x + lw + 12 * u, hy);
+  ctx.fillText(count, x + lw + 12 * u, hy);
   const cw = ctx.measureText(count).width;
   setSpacing(ctx, 0);
   ctx.strokeStyle = 'rgba(255,255,255,0.1)';
   ctx.lineWidth = 2 * u;
   ctx.beginPath();
-  ctx.moveTo(box.x + lw + cw + 34 * u, hy);
-  ctx.lineTo(box.x + box.w, hy);
+  ctx.moveTo(x + lw + cw + 34 * u, hy);
+  ctx.lineTo(x + w, hy);
   ctx.stroke();
 
-  const head = 44 * u;
-  const g = 10 * u;
-  const availH = box.h - head;
-  const cols = column ? 1 : clamp(Math.floor((box.w + g) / (280 * u + g)), 2, 5);
-  const rowH = column ? clamp((availH - g * (list.length - 1)) / list.length, 46 * u, 76 * u) : 60 * u;
-  const rows = Math.max(1, Math.floor((availH + g) / (rowH + g)));
-  const cap = rows * cols;
+  const cap = Math.max(1, rows * cols);
   const overflow = list.length > cap;
   const shown = overflow ? list.slice(0, cap - 1) : list;
-  const cellW = (box.w - g * (cols - 1)) / cols;
-  const cell = (i) => ({ x: box.x + (i % cols) * (cellW + g), y: box.y + head + Math.floor(i / cols) * (rowH + g) });
+  const cellW = (w - g * (cols - 1)) / cols;
+  const cell = (i) => ({ x: x + (i % cols) * (cellW + g), y: y + head + Math.floor(i / cols) * (rowH + g) });
   const r = Math.min(14 * u, rowH / 3);
 
   shown.forEach((p, i) => {
@@ -615,6 +639,25 @@ function drawBench(ctx, box, d, u, column, pixelRatio) {
     ctx.fillText(`+${list.length - cap + 1} more`, c.x + cellW / 2, c.y + rowH / 2);
   }
   ctx.restore();
+  return head + rows * rowH + Math.max(0, rows - 1) * g;
+}
+
+const GROUP_GAP = 28;
+
+// Column mode: groups stacked down a side panel, sharing its height.
+function drawBenchColumn(ctx, box, groups, u, d, pixelRatio) {
+  const head = 44 * u;
+  const g = 10 * u;
+  const gg = GROUP_GAP * u;
+  const total = groups.reduce((n, x) => n + x.list.length, 0);
+  const rowH = clamp((box.h - groups.length * head - (groups.length - 1) * gg - g * (total - groups.length)) / total, 46 * u, 76 * u);
+  let y = box.y;
+  for (const group of groups) {
+    const room = box.y + box.h - y;
+    const rows = Math.min(group.list.length, Math.floor((room - head + g) / (rowH + g)));
+    if (rows < 1) break;
+    y += drawBenchGroup(ctx, box.x, y, box.w, group, 1, rows, rowH, u, d, pixelRatio) + gg;
+  }
 }
 
 /**
@@ -623,7 +666,8 @@ function drawBench(ctx, box, d, u, column, pixelRatio) {
  */
 export function renderLineup(ctx, W, H, d, opts = {}) {
   const showTitle = opts.title !== false;
-  const showBench = opts.bench !== false && d.bench.length > 0;
+  const groups = opts.bench !== false ? benchGroups(d) : [];
+  const showBench = groups.length > 0;
   const pr = opts.pixelRatio || 1;
   const u = Math.min(W, H) / 1080;
   const ratio = W / H;
@@ -656,15 +700,29 @@ export function renderLineup(ctx, W, H, d, opts = {}) {
     benchW = clamp(area.w * 0.22, 300 * u, 440 * u);
     pitchArea = { ...area, w: area.w - benchW - gap };
   } else if (showBench) {
+    // Share a row budget between the groups: at least one row each, then fill as needed.
     const cols = clamp(Math.floor((area.w + 10 * u) / (290 * u)), 2, 5);
     const rowH = 60 * u;
     const rg = 10 * u;
     const head = 44 * u;
-    const maxH = area.h * (ratio < 1 ? 0.26 : 0.3);
-    const rowsNeeded = Math.ceil(d.bench.length / cols);
-    const rowsFit = Math.max(1, Math.floor((maxH - head + rg) / (rowH + rg)));
-    const rows = Math.min(rowsNeeded, rowsFit);
-    benchH = head + rows * rowH + (rows - 1) * rg;
+    const gg = GROUP_GAP * u;
+    const maxH = area.h * (ratio < 1 ? 0.3 : 0.32);
+    let budget = Math.max(groups.length, Math.floor((maxH - groups.length * head - (groups.length - 1) * gg + groups.length * rg) / (rowH + rg)));
+    for (const g of groups) {
+      g.need = Math.ceil(g.list.length / cols);
+      g.rows = 1;
+      budget -= 1;
+    }
+    while (budget > 0 && groups.some((g) => g.rows < g.need)) {
+      for (const g of groups) {
+        if (budget > 0 && g.rows < g.need) {
+          g.rows += 1;
+          budget -= 1;
+        }
+      }
+    }
+    for (const g of groups) g.cols = cols;
+    benchH = groups.reduce((h, g) => h + head + g.rows * rowH + (g.rows - 1) * rg, 0) + (groups.length - 1) * gg;
     pitchArea = { ...area, h: area.h - benchH - gap };
   }
 
@@ -710,5 +768,9 @@ export function renderLineup(ctx, W, H, d, opts = {}) {
   if (opts.underlay) opts.underlay(ctx, geo, geo.short * d.factor, pr, 'under');
   drawPlayers(ctx, geo, d, pr);
   if (opts.underlay) opts.underlay(ctx, geo, geo.short * d.factor, pr, 'over');
-  if (benchBox) drawBench(ctx, benchBox, d, u, side, pr);
+  if (benchBox && side) drawBenchColumn(ctx, benchBox, groups, u, d, pr);
+  else if (benchBox) {
+    let y = benchBox.y;
+    for (const g of groups) y += drawBenchGroup(ctx, benchBox.x, y, benchBox.w, g, g.cols, g.rows, 60 * u, u, d, pr) + GROUP_GAP * u;
+  }
 }
