@@ -707,6 +707,8 @@ export function renderLineup(ctx, W, H, d, opts = {}) {
 
   const geo = pitchGeometry(rect, orient);
   drawPitch(ctx, geo, d.pitch, radius);
+  if (opts.underlay) opts.underlay(ctx, geo, geo.short * d.factor, pr, 'under');
   drawPlayers(ctx, geo, d, pr);
+  if (opts.underlay) opts.underlay(ctx, geo, geo.short * d.factor, pr, 'over');
   if (benchBox) drawBench(ctx, benchBox, d, u, side, pr);
 }

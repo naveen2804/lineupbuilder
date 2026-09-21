@@ -1,5 +1,8 @@
 import { SIZES, FORMATIONS, buildFormation } from './formations.js';
 import { PITCH_THEMES, PATTERNS, EXPORT_FORMATS, TOKEN_FACTOR, pitchGeometry, drawPitch, drawKit, renderLineup, labelFor } from './render.js';
+import { emptyAnalysis, drawAnalysis, hasMarkings } from './analysis.js';
+import { createAnalysis } from './analysis-ui.js';
+import { createLibrary } from './library.js';
 
 const STORE_KEY = 'lineupbuilder.v2';
 const CITY_BLUE = '#6cabdd';
@@ -19,6 +22,10 @@ const ICONS = {
   trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
   bench: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  folder: '<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
+  analysis: '<path d="M4 19c3-1 4.5-4 6-7s3.5-5 7-6"/><path d="m14 4 3.2 2L15 9"/><circle cx="5" cy="6" r="2"/><path d="M15 16l4 4M19 16l-4 4"/>',
+  save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/>',
+  upload: '<path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/>',
 };
 
 function icon(name, size = 16) {
@@ -51,6 +58,8 @@ let state = load() || createState();
 let editing = null; // { pid } or { slot } (an empty formation spot)
 let geo = null;
 let drag = null;
+let analysis = null; // analysis-mode controller, created in init()
+let library = null; // saved-lineups controller, created in init()
 
 function createState() {
   return {
@@ -67,8 +76,10 @@ function createState() {
     pitch: 'classic',
     token: 'shirt',
     show: { names: true, numbers: true, roles: false },
-    export: { format: 'wide', title: true, bench: true, scale: 1 },
+    export: { format: 'wide', title: true, bench: true, analysis: true, scale: 1 },
     bulkTarget: 'pitch',
+    analysis: emptyAnalysis(),
+    savedId: null,
     players: {},
     slots: formationSlots('4-3-3'),
     bench: [],
@@ -86,13 +97,23 @@ function newPlayer(props = {}) {
   return id;
 }
 
+// Fill in any fields missing from older saves.
+function normalize(s) {
+  const base = createState();
+  const a = s.analysis || {};
+  return {
+    ...base,
+    ...s,
+    export: { ...base.export, ...s.export },
+    show: { ...base.show, ...s.show },
+    analysis: { ...base.analysis, ...a, overlays: { ...base.analysis.overlays, ...a.overlays }, style: { ...base.analysis.style, ...a.style } },
+  };
+}
+
 function load() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY));
-    if (s && s.v === 2 && Array.isArray(s.slots) && Array.isArray(s.bench) && s.players) {
-      const base = createState();
-      return { ...base, ...s, export: { ...base.export, ...s.export }, show: { ...base.show, ...s.show } };
-    }
+    if (s && s.v === 2 && Array.isArray(s.slots) && Array.isArray(s.bench) && s.players) return normalize(s);
   } catch {
     /* storage unavailable or corrupt */
   }
@@ -108,10 +129,30 @@ function save() {
     } catch {
       /* ignore */
     }
+    library?.updateIndicator();
   }, 200);
 }
 
 const kitFor = (p, gk) => p.kit || (gk ? state.gkKit : state.kit);
+
+// Where a player (or the ball) stands on the pitch, ignoring any running animation.
+function posOf(pid) {
+  if (pid === 'ball') return state.analysis.items.find((i) => i.type === 'ball')?.pts[0] || null;
+  const s = state.slots.find((x) => x.pid === pid);
+  return s ? { x: s.x, y: s.y } : null;
+}
+
+// Drop a deleted player's runs, spotlights and links.
+function forgetPlayer(pid) {
+  const a = state.analysis;
+  delete a.paths[pid];
+  a.spotlight = a.spotlight.filter((x) => x.pid !== pid);
+  for (const it of a.items) if (it.type === 'link') it.pids = it.pids.filter((x) => x !== pid);
+  a.items = a.items.filter((it) => it.type !== 'link' || it.pids.length > 1);
+}
+
+const hasContent = () => Object.keys(state.players).length > 0 || !!state.teamName.trim() || hasMarkings(state.analysis);
+const onScreenTokenSize = () => (geo ? Math.round(clamp(geo.short * tokenFactor(), 28, 84)) : 40);
 const isGKSpot = (slot, p) => (slot.f ? slot.role === 'GK' : !!p?.gk);
 
 function roleOf(slot, p) {
@@ -425,6 +466,12 @@ function layoutStage() {
   pitchCanvas.height = Math.round(h * dpr);
   pitchCanvas.style.width = `${w}px`;
   pitchCanvas.style.height = `${h}px`;
+  for (const layer of [$('#analysisLayer'), $('#analysisTop')]) {
+    layer.width = pitchCanvas.width;
+    layer.height = pitchCanvas.height;
+    layer.style.width = `${w}px`;
+    layer.style.height = `${h}px`;
+  }
   const ctx = pitchCanvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
@@ -434,14 +481,15 @@ function layoutStage() {
 }
 
 function positionToken(t, slot) {
-  const p = geo.map(slot.x, slot.y);
+  const at = (slot.pid && analysis?.displayPos(slot.pid)) || slot;
+  const p = geo.map(at.x, at.y);
   t.style.left = `${p.x}px`;
   t.style.top = `${p.y}px`;
 }
 
 function renderTokens() {
   if (!geo || drag?.moved) return;
-  const size = Math.round(clamp(geo.short * tokenFactor(), 28, 84));
+  const size = onScreenTokenSize();
   tokensEl.style.setProperty('--size', `${size}px`);
   tokensEl.style.setProperty('--fs', `${Math.max(11, size * 0.27)}px`);
   const box = Math.ceil(size * 1.3);
@@ -472,7 +520,8 @@ function renderTokens() {
       return t;
     }),
   );
-  $('#stageEmpty').hidden = state.slots.some((s) => s.pid) || state.mode === 'formation';
+  $('#stageEmpty').hidden = state.slots.some((s) => s.pid) || state.mode === 'formation' || !!analysis?.isOpen();
+  analysis?.render();
 }
 
 function addPlayerToPitch(at) {
@@ -590,6 +639,7 @@ function setTarget(t) {
 tokensEl.addEventListener('pointerdown', (e) => {
   const t = e.target.closest('.token');
   if (!t || e.button !== 0) return;
+  if (analysis?.handleTokenDown(e, Number(t.dataset.slot))) return;
   e.preventDefault();
   const i = Number(t.dataset.slot);
   const slot = state.slots[i];
@@ -638,6 +688,7 @@ function updateDrag(x, y) {
     slot.x = clamp(pt.x, -0.03, 1.03);
     slot.y = clamp(pt.y, -0.02, 1.02);
     positionToken(drag.el, slot);
+    analysis?.render();
   } else {
     drag.ghost.style.left = `${x}px`;
     drag.ghost.style.top = `${y}px`;
@@ -729,7 +780,7 @@ window.addEventListener('pointercancel', () => {
 });
 
 stage.addEventListener('dblclick', (e) => {
-  if (e.target.closest('.token')) return;
+  if (analysis?.consumesDblclick(e) || e.target.closest('.token')) return;
   const r = stage.getBoundingClientRect();
   const pt = geo.unmap(e.clientX - r.left, e.clientY - r.top);
   if (pt.x < -0.03 || pt.x > 1.03 || pt.y < -0.03 || pt.y > 1.03) return;
@@ -818,7 +869,7 @@ function renderDrawer() {
   if (onPitch) {
     actions.append(
       el('button', { type: 'button', class: 'btn', onclick: () => { slot.pid = null; state.bench.push(p.id); commit(); toast('Moved to the bench'); } }, icon('bench'), 'Move to bench'),
-      el('button', { type: 'button', class: 'btn danger', onclick: () => { slot.pid = null; delete state.players[p.id]; closeEditor(); commit(); } }, icon('trash'), 'Remove player'),
+      el('button', { type: 'button', class: 'btn danger', onclick: () => { slot.pid = null; delete state.players[p.id]; forgetPlayer(p.id); closeEditor(); commit(); } }, icon('trash'), 'Remove player'),
     );
   } else {
     const sel = el(
@@ -840,7 +891,7 @@ function renderDrawer() {
     actions.append(
       el('button', { type: 'button', class: 'btn', onclick: () => { state.bench.splice(state.bench.indexOf(p.id), 1); if (!placeOnPitch(p.id)) { state.bench.push(p.id); toast('No open space on the pitch'); } commit(); } }, icon('plus'), 'Put on the pitch'),
       field('Substitution', el('div', { class: 'select' }, sel)),
-      el('button', { type: 'button', class: 'btn danger', onclick: () => { state.bench.splice(state.bench.indexOf(p.id), 1); delete state.players[p.id]; closeEditor(); commit(); } }, icon('trash'), 'Delete player'),
+      el('button', { type: 'button', class: 'btn danger', onclick: () => { state.bench.splice(state.bench.indexOf(p.id), 1); delete state.players[p.id]; forgetPlayer(p.id); closeEditor(); commit(); } }, icon('trash'), 'Delete player'),
     );
   }
 
@@ -977,6 +1028,40 @@ function buildRenderData() {
   };
 }
 
+// Analysis markings for an exported image, drawn between the pitch and the players.
+function underlay(include) {
+  if (!include || !hasMarkings(state.analysis)) return null;
+  return (ctx, g, tokenSize, pixelRatio, layer) => drawAnalysis(ctx, g, state.analysis, { pos: posOf, home: posOf, tokenSize, pixelRatio }, layer);
+}
+
+function thumbnail() {
+  try {
+    const c = document.createElement('canvas');
+    c.width = 640;
+    c.height = 360;
+    renderLineup(c.getContext('2d'), 640, 360, buildRenderData(), { title: false, bench: false, underlay: underlay(true) });
+    return c.toDataURL('image/jpeg', 0.8);
+  } catch {
+    return '';
+  }
+}
+
+// The saved form of a lineup: everything except per-browser preferences.
+function snapshot() {
+  const { savedId, export: _export, bulkTarget, ...rest } = state;
+  return JSON.parse(JSON.stringify(rest));
+}
+
+function loadSnapshot(data, id) {
+  state = normalize({ ...data, export: state.export, bulkTarget: state.bulkTarget, savedId: id });
+  editing = null;
+  drawer.classList.remove('open');
+  closePop();
+  analysis.onStateReplaced();
+  layoutStage();
+  commit();
+}
+
 const currentFormat = () => EXPORT_FORMATS.find((f) => f.id === state.export.format) || EXPORT_FORMATS[1];
 
 function openExport() {
@@ -1006,7 +1091,7 @@ function renderExportSide() {
     }),
   );
   $('#exportInclude').replaceChildren(
-    ...[['title', 'Title & coach'], ['bench', 'Substitutes']].map(([key, label]) =>
+    ...[['title', 'Title & coach'], ['bench', 'Substitutes'], ['analysis', 'Analysis markings']].map(([key, label]) =>
       el('button', { type: 'button', class: 'chip', 'aria-pressed': String(s[key]), onclick: () => { s[key] = !s[key]; save(); renderExportSide(); drawPreview(); } }, label),
     ),
   );
@@ -1036,7 +1121,7 @@ async function drawPreview() {
   c.style.height = `${cssH}px`;
   const ctx = c.getContext('2d');
   ctx.setTransform(c.width / f.w, 0, 0, c.height / f.h, 0, 0);
-  renderLineup(ctx, f.w, f.h, buildRenderData(), { ...state.export, pixelRatio: c.width / f.w });
+  renderLineup(ctx, f.w, f.h, buildRenderData(), { ...state.export, pixelRatio: c.width / f.w, underlay: underlay(state.export.analysis) });
 }
 
 function renderFull() {
@@ -1047,7 +1132,7 @@ function renderFull() {
   c.height = f.h * s;
   const ctx = c.getContext('2d');
   ctx.scale(s, s);
-  renderLineup(ctx, f.w, f.h, buildRenderData(), { ...state.export, pixelRatio: s });
+  renderLineup(ctx, f.w, f.h, buildRenderData(), { ...state.export, pixelRatio: s, underlay: underlay(state.export.analysis) });
   return c;
 }
 
@@ -1082,6 +1167,54 @@ async function copyImage() {
 
 function init() {
   document.querySelectorAll('[data-icon]').forEach((n) => n.prepend(icon(n.dataset.icon)));
+
+  analysis = createAnalysis({
+    state: () => state,
+    geo: () => geo,
+    stage,
+    canvas: $('#analysisLayer'),
+    topCanvas: $('#analysisTop'),
+    tokensEl,
+    bar: $('#analysisBar'),
+    tokenSize: onScreenTokenSize,
+    posOf,
+    slotIndexOf: (pid) => state.slots.findIndex((s) => s.pid === pid),
+    renderTokens,
+    applyPositions(moves) {
+      for (const [pid, p] of moves) {
+        const s = state.slots.find((x) => x.pid === pid);
+        if (s) Object.assign(s, { x: clamp(p.x, -0.03, 1.03), y: clamp(p.y, -0.02, 1.02) });
+      }
+      commit();
+    },
+    save,
+    toast,
+    el,
+  });
+
+  library = createLibrary({
+    el,
+    icon,
+    toast,
+    snapshot,
+    currentId: () => state.savedId,
+    setCurrentId(id) {
+      state.savedId = id;
+      save();
+    },
+    load: loadSnapshot,
+    thumb: thumbnail,
+    hasContent,
+    defaultName: () => [state.teamName.trim(), state.subtitle.trim()].filter(Boolean).join(' · ') || `Lineup ${new Date().toLocaleDateString()}`,
+    summary: () => {
+      const onPitch = state.slots.filter((s) => s.pid).length;
+      return {
+        team: state.teamName.trim(),
+        label: state.mode === 'formation' ? state.formation : 'Freeform',
+        count: `${onPitch} on pitch${state.bench.length ? ` + ${state.bench.length} subs` : ''}`,
+      };
+    },
+  });
 
   const bindText = (sel, key) => {
     $(sel).addEventListener('input', (e) => { state[key] = e.target.value; save(); });
@@ -1120,14 +1253,23 @@ function init() {
   }
 
   $('#resetBtn').addEventListener('click', () => {
-    if (!window.confirm('Start over? All players, kits and settings will be cleared.')) return;
-    state = createState();
+    if (hasContent() && library.isDirty() && !window.confirm('Start a new lineup? Unsaved changes to the current one will be lost.')) return;
+    state = { ...createState(), export: state.export, bulkTarget: state.bulkTarget };
     editing = null;
     drawer.classList.remove('open');
     closePop();
+    analysis.onStateReplaced();
     layoutStage();
     commit();
-    toast('Lineup cleared');
+    toast('New lineup');
+  });
+
+  const analysisBtn = $('#analysisBtn');
+  analysisBtn.addEventListener('click', () => {
+    analysis.toggle();
+    analysisBtn.setAttribute('aria-pressed', String(analysis.isOpen()));
+    closeEditor();
+    renderTokens();
   });
 
   $('#exportBtn').addEventListener('click', openExport);
@@ -1140,8 +1282,14 @@ function init() {
     if (!pop.hidden && !pop.contains(e.target) && !e.target.closest('.kit-btn')) closePop();
   });
   document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      library.quickSave();
+      return;
+    }
     if (e.key !== 'Escape') return;
     if (!pop.hidden) closePop();
+    else if (library.isOpen()) library.close();
     else if (!modal.hidden) closeExport();
     else closeEditor();
   });

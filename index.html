@@ -32,7 +32,9 @@
         </div>
 
         <div class="actions">
-          <button id="resetBtn" class="btn ghost" type="button" data-icon="reset"><span class="hide-sm">Reset</span></button>
+          <button id="libraryBtn" class="btn ghost" type="button" data-icon="folder"><span class="hide-sm">Lineups</span><span class="dirty-dot" aria-hidden="true"></span></button>
+          <button id="analysisBtn" class="btn ghost analysis-toggle" type="button" aria-pressed="false" data-icon="analysis"><span class="hide-sm">Analysis</span></button>
+          <button id="resetBtn" class="btn ghost" type="button" data-icon="plus" title="Start a new lineup"><span class="hide-sm">New</span></button>
           <button id="exportBtn" class="btn primary" type="button" data-icon="image"><span>Export<span class="hide-sm"> image</span></span></button>
         </div>
       </header>
@@ -72,9 +74,12 @@
       </section>
 
       <main class="stage-wrap">
+        <section id="analysisBar" class="abar" aria-label="Analysis tools" hidden></section>
         <div id="stage" class="stage">
           <canvas id="pitch"></canvas>
+          <canvas id="analysisLayer"></canvas>
           <div id="tokens" class="tokens"></div>
+          <canvas id="analysisTop"></canvas>
           <div id="stageEmpty" class="stage-empty" hidden>
             <strong>Your pitch is empty</strong>
             <span>Paste your squad below, double-click the pitch, or use Add player</span>
@@ -145,7 +150,7 @@
         </div>
       </div>
 
-      <footer class="footer">Lineup Builder · Your lineup is saved in this browser</footer>
+      <footer class="footer">Lineup Builder · Your work is saved in this browser</footer>
     </div>
 
     <aside id="drawer" class="drawer" aria-label="Player editor" aria-hidden="true">
@@ -179,6 +184,33 @@
                 <button id="downloadBtn" class="btn primary" type="button" data-icon="download">Download PNG</button>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="libraryModal" class="modal" hidden>
+      <div class="modal-backdrop" data-close></div>
+      <div class="modal-card lib-card" role="dialog" aria-modal="true" aria-labelledby="libTitle">
+        <div class="modal-head">
+          <h2 id="libTitle">Saved lineups</h2>
+          <button class="icon-btn" type="button" aria-label="Close" data-close data-icon="x"></button>
+        </div>
+        <div class="lib-save">
+          <div id="libStatus" class="lib-status"></div>
+          <form id="libSaveForm" class="lib-form" autocomplete="off">
+            <input id="libName" class="input" maxlength="60" placeholder="Name this lineup" aria-label="Lineup name" />
+            <button id="libUpdate" class="btn" type="button" hidden><span>Update</span></button>
+            <button class="btn primary" type="submit" data-icon="plus">Save as new</button>
+          </form>
+        </div>
+        <div id="libList" class="lib-list"></div>
+        <div class="lib-foot">
+          <span class="note">Stored in this browser only · <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>S</kbd> saves the open lineup. Export a backup to move lineups to another device.</span>
+          <div class="lib-foot-actions">
+            <button id="libImport" class="btn ghost sm" type="button" data-icon="upload">Import</button>
+            <button id="libExport" class="btn ghost sm" type="button" data-icon="download">Export backup</button>
+            <input id="libFile" type="file" accept="application/json,.json" hidden />
           </div>
         </div>
       </div>
