@@ -1,6 +1,7 @@
 // Analysis mode: the tool palette and all pointer / keyboard interaction on the pitch.
 
-import { MARK_COLORS, drawAnalysis, hitTest, simplify, pathLength, pointAlong, runPoints } from './analysis.js';
+import { MARK_COLORS, drawAnalysis, hitTest, simplify, pathLength, pointAlong, runPoints, currentImage } from './analysis.js';
+import { addImage, getImage, removeImage } from './images.js';
 
 const ICONS = {
   select: '<path d="M4 3l7 17 2.4-7.1L20.5 10.5z"/>',
@@ -25,6 +26,9 @@ const ICONS = {
   play: '<path d="M7 4.5v15l12-7.5z" fill="currentColor"/>',
   back: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
+  image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.8"/><path d="m21 15-4.1-4.1a2 2 0 0 0-2.8 0L6 19"/>',
+  prev: '<path d="m14 6-6 6 6 6"/>',
+  next: '<path d="m10 6 6 6-6 6"/>',
 };
 
 const TOOLS = [
@@ -80,11 +84,13 @@ export function createAnalysis(api) {
   let redoStack = [];
   let anim = null;
   let text = null;
+  let imageEl = null; // decoded overlay for the picture currently selected
+  let imageId = null;
   const ui = {};
 
   const A = () => api.state().analysis;
   const livePos = (pid) => anim?.pos.get(pid) || api.posOf(pid);
-  const env = () => ({ pos: livePos, home: api.posOf, tokenSize: api.tokenSize(), selected, draft, pixelRatio: window.devicePixelRatio || 1 });
+  const env = () => ({ pos: livePos, home: api.posOf, tokenSize: api.tokenSize(), image: imageEl, selected, draft, pixelRatio: window.devicePixelRatio || 1 });
   const selectedItem = () => A().items.find((i) => i.id === selected) || null;
 
   /* ---------------------------------------------------------- render */
@@ -98,10 +104,81 @@ export function createAnalysis(api) {
       const ctx = c.getContext('2d');
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, c.width, c.height);
-      if (!A().visible && !(layer === 'over' && draft)) continue;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       drawAnalysis(ctx, geo, A(), e, layer);
     }
+  }
+
+  /* ----------------------------------------------------------- images */
+
+  // Load whichever screenshot is selected, then redraw. Cheap when nothing changed.
+  async function ensureImage() {
+    const meta = currentImage(A());
+    if (!meta) {
+      if (imageEl) {
+        imageEl = null;
+        imageId = null;
+        render();
+      }
+      return null;
+    }
+    if (meta.id === imageId) return imageEl;
+    imageEl = await getImage(meta.id);
+    imageId = meta.id;
+    if (!imageEl) toast(`“${meta.name}” is no longer stored in this browser`);
+    render();
+    renderBar();
+    return imageEl;
+  }
+
+  async function uploadImages(files) {
+    const list = [...files].filter((f) => f.type.startsWith('image/'));
+    if (!list.length) return;
+    let kept = true;
+    const metas = [];
+    for (const file of list.slice(0, 12)) {
+      try {
+        const res = await addImage(file);
+        metas.push(res.meta);
+        kept = kept && res.kept;
+      } catch {
+        toast(`Could not read “${file.name}”`);
+      }
+    }
+    if (!metas.length) return;
+    const a = A();
+    a.images.push(...metas);
+    a.imageIndex = a.images.length - metas.length;
+    a.imageShow = true;
+    api.save();
+    await ensureImage();
+    renderBar();
+    toast(`Added ${metas.length} image${metas.length === 1 ? '' : 's'}${kept ? '' : ' — they will be lost when you close this tab'}`);
+  }
+
+  function stepImage(delta) {
+    const a = A();
+    if (a.images.length < 2) return;
+    a.imageIndex = (a.imageIndex + delta + a.images.length) % a.images.length;
+    a.imageShow = true;
+    api.save();
+    ensureImage();
+    renderBar();
+  }
+
+  async function dropImage() {
+    const a = A();
+    const meta = currentImage(a);
+    if (!meta || !window.confirm(`Remove “${meta.name}” from this lineup?`)) return;
+    a.images = a.images.filter((i) => i.id !== meta.id);
+    a.imageIndex = Math.max(0, Math.min(a.imageIndex, a.images.length - 1));
+    imageId = null;
+    imageEl = null;
+    await removeImage(meta.id);
+    api.save();
+    await ensureImage();
+    render();
+    renderBar();
   }
 
   /* --------------------------------------------------------- history */
@@ -621,6 +698,9 @@ export function createAnalysis(api) {
       cancelAnimationFrame(anim.raf);
       anim = null;
     }
+    imageEl = null;
+    imageId = null;
+    ensureImage();
     renderBar();
     render();
   }
@@ -674,6 +754,25 @@ export function createAnalysis(api) {
       if (k === 'delete' || k === 'backspace') {
         if (deleteSelected()) stop();
         return;
+      }
+      if (k === 'h') {
+        stop();
+        A().visible = !A().visible;
+        changed();
+        return;
+      }
+      if (A().images.length) {
+        if (k === 'i') {
+          stop();
+          A().imageShow = !A().imageShow;
+          changed();
+          return;
+        }
+        if (k === '[' || k === ']') {
+          stop();
+          stepImage(k === '[' ? -1 : 1);
+          return;
+        }
       }
       const t = ALL_TOOLS.find((x) => x.key === k);
       if (t) {
@@ -764,6 +863,34 @@ export function createAnalysis(api) {
     ui.speed = el('div', { class: 'seg', role: 'group', 'aria-label': 'Playback speed' }, ...[0.5, 1, 2].map((v) => el('button', { type: 'button', dataset: { v }, onclick: () => { A().speed = v; api.save(); renderBar(); } }, `${v}×`)));
     ui.reset = el('button', { type: 'button', class: 'btn ghost sm', title: 'Put players back', onclick: () => stopAnimation() }, svg('back', 14), 'Reset');
     ui.apply = el('button', { type: 'button', class: 'btn sm', title: 'Move players to where their runs end', onclick: applyMoves }, svg('check', 14), 'Keep positions');
+    ui.file = el('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true });
+    ui.file.addEventListener('change', () => {
+      uploadImages(ui.file.files);
+      ui.file.value = '';
+    });
+    ui.addImage = el('button', { type: 'button', class: 'btn upload-btn', onclick: () => ui.file.click(), title: 'Overlay match screenshots on the pitch' }, svg('image', 16), 'Upload match screenshots');
+    ui.imgPrev = el('button', { type: 'button', class: 'icon-btn', title: 'Previous image ([)', 'aria-label': 'Previous image', onclick: () => stepImage(-1) }, svg('prev'));
+    ui.imgNext = el('button', { type: 'button', class: 'icon-btn', title: 'Next image (])', 'aria-label': 'Next image', onclick: () => stepImage(1) }, svg('next'));
+    ui.imgName = el('span', { class: 'abar-img-name' });
+    ui.imgEye = el('button', { type: 'button', class: 'icon-btn', onclick: () => { A().imageShow = !A().imageShow; changed(); } });
+    ui.imgOpacity = el('input', { type: 'range', min: '10', max: '100', step: '5', 'aria-label': 'Image opacity' });
+    ui.imgOpacity.addEventListener('input', () => {
+      A().imageOpacity = Number(ui.imgOpacity.value) / 100;
+      api.save();
+      render();
+      ui.imgOpacityValue.textContent = `${ui.imgOpacity.value}%`;
+    });
+    ui.imgOpacityValue = el('output', {});
+    ui.imgFit = el('div', { class: 'seg' }, ...['contain', 'cover', 'stretch'].map((f) => el('button', { type: 'button', dataset: { fit: f }, onclick: () => { A().imageFit = f; changed(); } }, f[0].toUpperCase() + f.slice(1))));
+    ui.imgDelete = el('button', { type: 'button', class: 'icon-btn', title: 'Remove this image', 'aria-label': 'Remove this image', onclick: dropImage }, svg('trash'));
+    ui.imageRow = el(
+      'div',
+      { class: 'abar-row abar-image' },
+      el('span', { class: 'abar-label' }, 'Match screenshots'),
+      ui.addImage,
+      ui.file,
+      el('div', { class: 'abar-img-controls' }, ui.imgPrev, ui.imgName, ui.imgNext, ui.imgEye, el('span', { class: 'abar-label' }, 'Opacity'), ui.imgOpacity, ui.imgOpacityValue, ui.imgFit, ui.imgDelete),
+    );
     ui.hint = el('div', { class: 'abar-hint' });
 
     bar.replaceChildren(
@@ -775,6 +902,7 @@ export function createAnalysis(api) {
         el('div', { class: 'abar-overlays' }, el('span', { class: 'abar-label' }, 'Overlays'), ...ui.overlays),
         el('div', { class: 'abar-play' }, ui.play, ui.speed, ui.reset, ui.apply),
       ),
+      ui.imageRow,
       ui.hint,
     );
   }
@@ -786,7 +914,7 @@ export function createAnalysis(api) {
     ui.undo.disabled = !undoStack.length;
     ui.redo.disabled = !redoStack.length;
     ui.eye.replaceChildren(svg(a.visible ? 'eye' : 'eyeOff'));
-    ui.eye.title = a.visible ? 'Hide markings' : 'Show markings';
+    ui.eye.title = a.visible ? 'Hide lines and shapes (H)' : 'Show lines and shapes (H)';
     ui.eye.setAttribute('aria-label', ui.eye.title);
     const hasAny = a.items.length || Object.keys(a.paths).length || a.spotlight.length;
     ui.clear.disabled = !hasAny;
@@ -809,6 +937,23 @@ export function createAnalysis(api) {
     ui.reset.hidden = !anim;
     ui.apply.hidden = !anim?.done;
 
+    const meta = currentImage(a);
+    const many = a.images.length > 1;
+    ui.imageRow.querySelector('.abar-img-controls').hidden = !meta;
+    if (meta) {
+      ui.imgName.textContent = many ? `${a.imageIndex + 1}/${a.images.length} · ${meta.name}` : meta.name;
+      ui.imgName.title = meta.name;
+      ui.imgPrev.hidden = !many;
+      ui.imgNext.hidden = !many;
+      ui.imgEye.replaceChildren(svg(a.imageShow ? 'eye' : 'eyeOff'));
+      ui.imgEye.title = a.imageShow ? 'Hide the image (I)' : 'Show the image (I)';
+      ui.imgEye.setAttribute('aria-label', ui.imgEye.title);
+      const pct = Math.round((a.imageOpacity ?? 0.7) * 100);
+      if (document.activeElement !== ui.imgOpacity) ui.imgOpacity.value = String(pct);
+      ui.imgOpacityValue.textContent = `${pct}%`;
+      ui.imgFit.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.fit === (a.imageFit || 'contain')));
+    }
+
     const t = ALL_TOOLS.find((x) => x.id === tool);
     let hint = t.hint;
     if (draft?.type === 'poly') hint = '<b>Custom zone</b> — keep clicking to add corners. Click the first corner or press Enter to finish, Esc to cancel.';
@@ -825,6 +970,8 @@ export function createAnalysis(api) {
     handleTokenDown,
     consumesDblclick,
     displayPos: (pid) => anim?.pos.get(pid) || null,
+    image: () => imageEl,
+    ensureImage,
     stopAnimation,
     onStateReplaced,
   };

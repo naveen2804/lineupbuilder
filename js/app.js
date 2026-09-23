@@ -1282,7 +1282,7 @@ function buildRenderData() {
 // Analysis markings for an exported image, drawn between the pitch and the players.
 function underlay(include) {
   if (!include || !hasMarkings(state.analysis)) return null;
-  return (ctx, g, tokenSize, pixelRatio, layer) => drawAnalysis(ctx, g, state.analysis, { pos: posOf, home: posOf, tokenSize, pixelRatio }, layer);
+  return (ctx, g, tokenSize, pixelRatio, layer) => drawAnalysis(ctx, g, state.analysis, { pos: posOf, home: posOf, tokenSize, pixelRatio, image: analysis?.image() }, layer);
 }
 
 function thumbnail() {
@@ -1357,6 +1357,7 @@ function renderExportSide() {
 async function drawPreview() {
   if (modal.hidden) return;
   await fontsReady;
+  await analysis.ensureImage();
   const f = currentFormat();
   const box = $('#previewBox');
   const bw = box.clientWidth - 48;
@@ -1393,6 +1394,7 @@ const slug = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^\
 
 async function downloadImage() {
   await fontsReady;
+  await analysis.ensureImage();
   const f = currentFormat();
   const blob = await toBlob(renderFull());
   if (!blob) return toast('Could not create the image');
@@ -1407,7 +1409,7 @@ async function downloadImage() {
 
 async function copyImage() {
   try {
-    const blob = fontsReady.then(() => toBlob(renderFull()));
+    const blob = Promise.all([fontsReady, analysis.ensureImage()]).then(() => toBlob(renderFull()));
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
     toast('Image copied to clipboard');
   } catch {
@@ -1645,6 +1647,7 @@ function init() {
     }, 60);
   });
 
+  analysis.ensureImage();
   renderToolbar();
   layoutStage();
   renderBench();

@@ -554,6 +554,14 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius
 .abar .swatch.on { box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.4), 0 0 0 2px var(--ring-gap), 0 0 0 4px var(--accent); }
 .seg.widths button { width: 32px; display: grid; place-items: center; }
 .seg.widths span { display: block; width: 16px; border-radius: 99px; background: currentColor; }
+.abar-image { justify-content: flex-start; gap: 8px 14px; padding-top: 8px; border-top: 1px solid var(--border); }
+.upload-btn { height: 34px; border-color: rgba(198, 244, 50, 0.45); background: var(--accent-soft); color: var(--text); }
+.upload-btn:hover { border-color: var(--accent); background: rgba(198, 244, 50, 0.16); }
+.abar-img-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.abar-img-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 12.5px var(--ui); color: var(--text); }
+.abar-img-controls input[type="range"] { width: 92px; }
+.abar-img-controls output { min-width: 38px; font: 600 12px var(--ui); color: var(--muted); font-variant-numeric: tabular-nums; }
+.abar-image .seg button { height: 26px; padding: 0 9px; font-size: 12px; }
 .abar-hint { color: var(--muted); font-size: 12.5px; line-height: 1.4; padding: 0 2px; }
 .abar-hint b { color: var(--text); font-weight: 600; }
 

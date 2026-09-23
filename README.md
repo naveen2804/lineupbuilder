@@ -10,6 +10,9 @@ Build football lineups on a full-width pitch and export them as share-ready imag
 - **Analysis mode**: freehand, lines, arrows, distance measuring, box/oval/custom zones, player runs with
   animated playback, player links, spotlights, opposition markers, the ball, text labels, and thirds /
   5-lane / 18-zone overlays — with undo/redo and keyboard shortcuts. Markings can be included in exports.
+- **Pitch overlays**: upload match screenshots onto the pitch, cycle through them, set their
+  opacity and fit, and show or hide the picture and the markings independently. Pictures are kept
+  in IndexedDB, so they don't crowd out saved lineups.
 - **Saved lineups**: keep any number of lineups in the browser with thumbnails; open, rename, duplicate,
   delete, and export/import a JSON backup. <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd> saves the open lineup.
 - **Opposition team**: add their players in bulk, with their own kits, shape, head coach and bench.

@@ -8,6 +8,7 @@ export const MARK_COLORS = ['#ffffff', '#facc15', '#f43f5e', '#fb923c', '#38bdf8
 const WIDTH = { 1: 0.0035, 2: 0.006, 3: 0.0095 };
 const FIELD_L = 105;
 const FIELD_W = 68;
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 export function emptyAnalysis() {
   return {
@@ -16,13 +17,20 @@ export function emptyAnalysis() {
     paths: {}, // pid (or 'ball') -> { pts: offsets from the start position, color }
     spotlight: [], // [{ pid, color }]
     overlays: { thirds: false, lanes: false, zones: false },
+    images: [], // [{ id, name, w, h }] — the pictures live in IndexedDB (images.js)
+    imageIndex: 0,
+    imageShow: true,
+    imageOpacity: 0.7,
+    imageFit: 'contain',
     style: { color: '#ffffff', width: 2, dashed: false, head: false },
     oppColor: '#ef4444',
     speed: 1,
   };
 }
 
-export const hasMarkings = (a) => !!a && (a.items.length > 0 || Object.keys(a.paths).length > 0 || a.spotlight.length > 0 || Object.values(a.overlays).some(Boolean));
+export const hasMarkings = (a) => !!a && (a.items.length > 0 || Object.keys(a.paths).length > 0 || a.spotlight.length > 0 || Object.values(a.overlays).some(Boolean) || (a.images || []).length > 0);
+
+export const currentImage = (a) => (a?.images || [])[a?.imageIndex] || null;
 
 /* ------------------------------------------------------------ geometry */
 
@@ -159,6 +167,33 @@ function label(ctx, x, y, text, size, color, bg) {
 }
 
 const textBoxes = new Map();
+
+// A match screenshot laid over the grass, drawn in pitch space so it turns with a
+// vertical pitch exactly as the players do.
+function drawImageLayer(ctx, geo, a, img) {
+  if (!img || !a.imageShow) return;
+  const { rect, orient, long, short } = geo;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rect.x, rect.y, rect.w, rect.h);
+  ctx.clip();
+  if (orient === 'h') ctx.translate(rect.x, rect.y);
+  else {
+    ctx.translate(rect.x, rect.y + rect.h);
+    ctx.rotate(-Math.PI / 2);
+  }
+  ctx.globalAlpha = clamp(a.imageOpacity ?? 0.7, 0.05, 1);
+  let [x, y, w, h] = [0, 0, long, short];
+  if (a.imageFit !== 'stretch') {
+    const s = a.imageFit === 'cover' ? Math.max(long / img.width, short / img.height) : Math.min(long / img.width, short / img.height);
+    w = img.width * s;
+    h = img.height * s;
+    x = (long - w) / 2;
+    y = (short - h) / 2;
+  }
+  ctx.drawImage(img, x, y, w, h);
+  ctx.restore();
+}
 
 function drawOverlays(ctx, geo, o) {
   const P = (x, y) => geo.map(x, y);
@@ -420,7 +455,7 @@ function drawRuns(ctx, geo, a, env) {
 
 /**
  * Draw markings. env: { pos(pid) live position, home(pid) start position,
- * tokenSize, selected?: id, draft?: item, pixelRatio? }.
+ * tokenSize, image?: HTMLImageElement, selected?: id, draft?: item, pixelRatio? }.
  * layer 'under' sits beneath the players, 'over' (labels, the stroke being drawn and the
  * selection outline) sits above them; 'all' draws both.
  */
@@ -432,6 +467,9 @@ export function drawAnalysis(ctx, geo, a, env, layer = 'all') {
 
 function drawUnder(ctx, geo, a, env) {
   const zones = ['rect', 'ellipse', 'poly'];
+  // The screenshot has its own show/hide, independent of the markings.
+  drawImageLayer(ctx, geo, a, env.image);
+  if (a.visible === false) return;
   drawOverlays(ctx, geo, a.overlays);
   for (const it of a.items) if (zones.includes(it.type)) drawItem(ctx, geo, it, env);
   drawSpotlights(ctx, geo, a, env);
@@ -441,9 +479,9 @@ function drawUnder(ctx, geo, a, env) {
 }
 
 function drawOver(ctx, geo, a, env) {
-  for (const it of a.items) if (it.type === 'text') drawItem(ctx, geo, it, env);
+  if (a.visible !== false) for (const it of a.items) if (it.type === 'text') drawItem(ctx, geo, it, env);
   if (env.draft) drawItem(ctx, geo, env.draft, env);
-  if (env.selected) {
+  if (env.selected && a.visible !== false) {
     const it = a.items.find((x) => x.id === env.selected);
     const b = it && itemBounds(it, geo, env);
     if (b) {
